@@ -1,0 +1,36 @@
+# Data
+data/
+*.csv
+*.xlsx
+
+# Archives and Old Versions
+_ARCHIVE/
+Quant_1/
+Quant_2/
+Quant_V1/
+Quant_V2/
+Quant_V3_C/
+Quant_V4_Deep/
+Quant_V5_C/
+Quant_Framework/
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+.venv/
+Quant_V6_G/config.py
+
+# VS Code
+.vscode/
+
+# Images
+*.png
+*.jpg
+
