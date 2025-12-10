@@ -20,10 +20,11 @@ import config
 from config import TIMEFRAMES, REWARD_RATIO
 
 # 引入所有策略
-from strategies.multi_timeframe_trend import MultiTimeframeTrendStrategy
 from strategies.breakout_trend import BreakoutTrendStrategy
 from strategies.bollinger_reversion import BollingerReversionStrategy
 from strategies.supertrend_strategy import SupertrendStrategy
+from strategies.supertrend_optimized import SupertrendOptimizedStrategy # [新增] 優化版
+from strategies.meme_breakout_strategy import MemeBreakoutStrategy # [新增]
 from core.regime_detector import RegimeDetector, MarketRegime
 
 class MockExchangeAPI:
@@ -86,7 +87,7 @@ class MockExchangeAPI:
         return {'last': price}
 
 class CompositeBacktester:
-    def __init__(self, csv_trend, csv_entry, trend_tf, entry_tf, start_date=None, end_date=None, initial_equity=1000.0, fee_rate=0.0005, slippage=0.0002):
+    def __init__(self, csv_trend, csv_entry, trend_tf, entry_tf, start_date=None, end_date=None, initial_equity=1000.0, fee_rate=0.0005, slippage=0.0002, strategies=None):
         self.trend_tf = trend_tf
         self.entry_tf = entry_tf
         self.fee_rate = fee_rate      # 0.05% (Taker)
@@ -98,14 +99,17 @@ class CompositeBacktester:
         config.TIMEFRAMES["entry"] = entry_tf
 
         # ---------------------------------------------------
-        # 初始化所有策略 (模擬 QuantBot)
+        # 初始化所有策略 (可由外部覆蓋)
         # ---------------------------------------------------
-        self.strategies = [
-            # MultiTimeframeTrendStrategy(),     # 1. 趨勢回調 (主) - 暫時停用
-            # BreakoutTrendStrategy(rr=REWARD_RATIO),  # 2. 波動率突破 (表現不佳，停用)
-            SupertrendStrategy(rr=REWARD_RATIO), # 3. 超級趨勢 (優化版 - 核心策略)
-            BollingerReversionStrategy(rr=REWARD_RATIO), # 4. 趨勢回調 (優化版 - 輔助策略)
-        ]
+        if strategies is not None:
+            self.strategies = strategies
+        else:
+            self.strategies = [
+                SupertrendStrategy(rr=3.5), # 3. 超級趨勢 (最佳配置: RR 3.5 + Regime Filter)
+                # SupertrendOptimizedStrategy(rr=3.5), # 4. 超級趨勢 (優化版)
+                # BollingerReversionStrategy(rr=1.5), # 7. 布林逆勢 (ETH 測試)
+                # MemeBreakoutStrategy(rr=4.0), # 暫停
+            ]
         self.regime_detector = RegimeDetector()
 
         self.trades = []
@@ -156,9 +160,17 @@ class CompositeBacktester:
         total_candles = len(self.df_entry)
         check_interval = max(1, total_candles // 10)
         
+        # [新增] 冷卻機制
+        cooldown_counter = 0
+        COOLDOWN_PERIOD = 16 # 4小時 (16 * 15m)
+        
         for i, row in self.df_entry.iterrows():
             if i % check_interval == 0:
                 print(f"   進度: {i/total_candles*100:.0f}%")
+            
+            # 減少冷卻計數
+            if cooldown_counter > 0:
+                cooldown_counter -= 1
                 
             current_ts = row['timestamp']
             current_price = row['close']
@@ -272,16 +284,39 @@ class CompositeBacktester:
                         'equity': self.equity,
                         'strategy': position.get('strategy', 'Unknown')
                     })
+                    
+                    # [新增] 虧損後觸發冷卻
+                    if net_pnl < 0:
+                        cooldown_counter = COOLDOWN_PERIOD
+                        
                     position = None
                     continue 
             
             # 2. 檢查進場 (模擬 QuantBot 的 check_signals)
-            if position is None:
+            if position is None and cooldown_counter == 0:
+                # 0. 判斷市場狀態 (Regime Detection)
+                # 使用 Trend Timeframe (4h) 來判斷大環境
+                ohlcv_trend = self.api.fetch_ohlcv(globals().get('SYMBOL', 'ETH') + '/USDT', self.trend_tf, limit=100)
+                regime = self.regime_detector.detect_regime(ohlcv_trend)
+                
                 # 依序詢問每個策略
                 signal = None
                 for strat in self.strategies:
-                    # 取得全域變數 SYMBOL，若無則預設 SOL
-                    sym = globals().get('SYMBOL', 'SOL')
+                    # 策略選擇邏輯 (Regime Switching)
+                    if regime == MarketRegime.TRENDING:
+                        # 趨勢盤：只允許趨勢策略
+                        if "Trend" not in strat.name and "Supertrend" not in strat.name:
+                            continue
+                    elif regime == MarketRegime.RANGING:
+                        # 盤整盤：只允許逆勢策略
+                        if "Reversion" not in strat.name and "Divergence" not in strat.name:
+                            continue
+                    else:
+                        # 不確定或劇烈波動：暫停交易 (Cash is King)
+                        continue
+
+                    # 取得全域變數 SYMBOL，若無則預設 ETH
+                    sym = globals().get('SYMBOL', 'ETH')
                     s = strat.analyze(self.api, f"{sym}/USDT")
                     if s:
                         signal = s
@@ -311,6 +346,7 @@ class CompositeBacktester:
                             'entry': entry_price,
                             'entry_ts': current_ts, # Record entry time for funding calc
                             'sl': signal['sl'],
+                            'initial_sl': signal['sl'], # Record initial SL for Breakeven calc
                             'tp': signal['tp'],
                             'side': signal['side'],
                             'size': size,
@@ -454,11 +490,11 @@ if __name__ == "__main__":
     # ==========================================
     # ⚙️ 使用者設定區
     # ==========================================
-    SYMBOL = "BTC"
-    TREND_TIMEFRAME = "4h"   
-    ENTRY_TIMEFRAME = "15m"   
+    SYMBOL = "ETH"
+    TREND_TIMEFRAME = "4h"
+    ENTRY_TIMEFRAME = "1h"
     START_DATE = "2023-01-01"
-    END_DATE = None
+    END_DATE = "2025-12-31"
     
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # data_dir is in the parent of project_root (TRADING/data)

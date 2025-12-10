@@ -17,6 +17,7 @@ from datetime import datetime
 from utils.logger_util import log, notify_position_closed
 from utils.trade_recorder import record_trade
 from config import POSITION_REPORT_INTERVAL
+from core.persistence import save_positions, load_positions, remove_position # [新增] 持久化模組
 
 class PositionManager:
     """
@@ -43,6 +44,13 @@ class PositionManager:
         #   ...
         # }
         self.positions = {}
+        
+        # [新增] 嘗試從 DB 載入上次的倉位狀態 (主要是為了 entry_time)
+        saved_positions = load_positions()
+        if saved_positions:
+            self.positions = saved_positions
+            log(f"📥 已從資料庫恢復 {len(self.positions)} 筆倉位狀態")
+
         self.position_history = []
         self.last_position_report = 0
 
@@ -100,9 +108,18 @@ class PositionManager:
                 lev = float(pos.get("leverage", 1))
 
                 # 保留 entry_time（若本地已有）
-                entry_time = (
-                    self.positions.get(symbol, {}).get("entry_time", time.time())
-                )
+                # [修正] 優先使用 DB/Memory 中的 entry_time，否則使用 API 的 ctime (若有)，最後才用 now
+                # OKX API position 包含 cTime (creation time in ms)
+                api_ctime = float(pos.get("cTime", 0)) / 1000.0
+                
+                existing_entry_time = self.positions.get(symbol, {}).get("entry_time")
+                
+                if existing_entry_time:
+                    entry_time = existing_entry_time
+                elif api_ctime > 0:
+                    entry_time = api_ctime
+                else:
+                    entry_time = time.time()
                 
                 # [修正] 優先使用 API 回傳的 side，否則才用 size 正負判斷
                 # ExchangeAPI.fetch_positions 已經處理好 side ("long"/"short")
@@ -133,6 +150,9 @@ class PositionManager:
 
             # 3. 更新緩存
             self.positions = current_positions
+            
+            # [新增] 將最新狀態寫入 DB
+            save_positions(self.positions)
 
             log(f"📊 倉位同步完成：{len(self.positions)} 筆倉位")
 

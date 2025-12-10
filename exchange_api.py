@@ -246,51 +246,40 @@ class ExchangeAPI:
         log(f"📐 Size Conversion: {qty:.4f} {market['base']} -> {qty_p} Contracts (1 Contract = {contract_size} {market['base']})")
 
         # ============================================================
-        # Step 1: 主單（net_mode 不要 posSide）
+        # Step 1: Atomic Order (主單 + 附帶止盈止損)
         # ============================================================
+        # 使用 OKX 的 attachAlgoOrds 功能，確保下單與 TP/SL 是原子操作
+        # 這樣不會發生「主單成交但 TP/SL 失敗」的慘劇
         try:
+            params = {
+                "tdMode": "isolated",
+                "attachAlgoOrds": [
+                    {
+                        "tpTriggerPx": str(tp),
+                        "tpOrdPx": "-1",   # -1 代表市價止盈
+                        "slTriggerPx": str(sl),
+                        "slOrdPx": "-1"    # -1 代表市價止損
+                    }
+                ]
+            }
+
             order = self.exchange.create_order(
                 symbol=symbol,
                 type="limit",
                 side=side,
                 amount=qty_p,  # 傳入張數
                 price=price_p,
-                params={
-                    "tdMode": "isolated",
-                    # ❗ net_mode 不要 posSide ！！
-                }
+                params=params
             )
             order_id = order["id"]
-            log(f"✅ Main Order OK id={order_id}")
-
-        except Exception as e:
-            log_error(f"❌ Main Order Failed: {e}")
-            return False
-
-        # ============================================================
-        # Step 2: OCO（net_mode 不要 posSide）
-        # ============================================================
-        try:
-            algo = self.exchange.private_post_trade_order_algo({
-                "instId": market["id"],
-                "tdMode": "isolated",
-                "ordType": "oco",
-                "side": "sell" if side == "buy" else "buy",
-                "sz": str(qty_p),  # 傳入張數 (字串)
-                "tpTriggerPx": str(tp),
-                "tpOrdPx": "-1",
-                "slTriggerPx": str(sl),
-                "slOrdPx": "-1",
-                # ❗ net_mode 不要 posSide ！！
-            })
-
-            algo_id = algo.get("data", [{}])[0].get("algoId", "unknown")
-            log(f"📌 OCO OK algoId={algo_id}")
+            log(f"✅ Atomic Order OK (Main+TPSL) id={order_id}")
             return True
 
         except Exception as e:
-            log_error(f"❌ OCO Failed: {e}")
+            log_error(f"❌ Atomic Order Failed: {e}")
             return False
+
+        # (舊版 Step 2 OCO 已移除，改用上述原子操作)
 
     # ------------------------------------------------------------
     # 修改訂單 (用於移動止損)

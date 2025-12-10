@@ -11,9 +11,10 @@ import time
 from datetime import datetime, timedelta
 
 from exchange_api import ExchangeAPI
-from strategies.multi_timeframe_trend import MultiTimeframeTrendStrategy
+from strategies.supertrend_optimized import SupertrendOptimizedStrategy
 from strategies.breakout_trend import BreakoutTrendStrategy
 from strategies.bollinger_reversion import BollingerReversionStrategy
+from strategies.meme_breakout_strategy import MemeBreakoutStrategy
 from core.position_manager import PositionManager
 from core.risk_manager import RiskManager
 from core.order_manager import OrderManager
@@ -28,6 +29,7 @@ from utils.logger_util import (
 from config import (
     SYMBOLS,
     AUTO_SYMBOL_SELECTION, # [新增]
+    SYMBOL_STRATEGY_MAP,   # [新增] 策略綁定
     MAX_CONCURRENT_TRADES,
     POSITION_REPORT_INTERVAL,
     HEARTBEAT_INTERVAL,
@@ -62,12 +64,14 @@ class QuantBot:
         #   - 給舊的 run()/check_signals 用：self.strategy_sequence 依序嘗試
         # ======================================================
         self.strategies = {
-            "trend": MultiTimeframeTrendStrategy(),     # 主策略：趨勢 + 回調
+            "supertrend_opt": SupertrendOptimizedStrategy(rr=REWARD_RATIO), # 主策略：優化版 Supertrend
             "breakout": BreakoutTrendStrategy(rr=REWARD_RATIO),  # 第二策略：趨勢 + 突破
-            "reversion": BollingerReversionStrategy(rr=REWARD_RATIO), # [新增] 第三策略：震盪回歸
+            "reversion": BollingerReversionStrategy(rr=REWARD_RATIO), # 第三策略：震盪回歸
+            "meme": MemeBreakoutStrategy(), # 特種策略：Meme 幣
         }
-        self.strategy_sequence = [
-            self.strategies["trend"],
+        # 預設順序 (若 config 未指定綁定時使用)
+        self.default_sequence = [
+            self.strategies["supertrend_opt"],
             self.strategies["breakout"],
             self.strategies["reversion"],
         ]
@@ -134,7 +138,6 @@ class QuantBot:
                 time.sleep(30)
 
     # ========= 啟動 / 報告 / 心跳 ==========
-
     def send_startup_message(self):
         """啟動時送一則 TG 訊息（如果有設定）"""
         msg = f"""
@@ -142,8 +145,10 @@ class QuantBot:
 
 📊 監控標的 ({len(self.symbols)}): {", ".join(self.symbols[:5])}...
 🤖 策略:
-  - MultiTimeframeTrend (趨勢 + 回調)
-  - BreakoutTrend (趨勢 + 突破)
+  - SupertrendOptimized (趨勢)
+  - BreakoutTrend (突破)
+  - BollingerReversion (回歸)
+⏰ 啟動時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ⏰ 啟動時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 <i>系統運行中，將定期回報倉位與健康狀態...</i>
@@ -263,17 +268,23 @@ class QuantBot:
                             need_move = True
                             
                     if need_move:
-                        log(f"💰 {symbol} 獲利 > 1%，移動止損至保本位 {entry_price}")
                         # 尋找該 symbol 的 Algo 訂單 (SL)
                         algos = self.api.fetch_open_algo_orders(symbol)
-                        for algo in algos:
-                            # 簡單判斷：如果是 OCO 或 Stop Loss
-                            if algo.get("ordType") in ["oco", "conditional", "trigger"]:
-                                algo_id = algo["algoId"]
-                                success = self.api.amend_order(symbol, algo_id, new_trigger_price=new_sl)
-                                if success:
-                                    pos["sl"] = new_sl # 更新本地 SL 記錄
-                                break
+                        
+                        if not algos:
+                            # [修正] 找不到止損單時，不要印誤導性的 "移動止損" Log，改印警告
+                            log(f"⚠️ {symbol} 獲利 > 1% 但找不到止損單！(可能為手動開倉或下單異常)")
+                            # TODO: 未來可在此處加入「自動補掛止損」的邏輯
+                        else:
+                            log(f"💰 {symbol} 獲利 > 1%，移動止損至保本位 {entry_price}")
+                            for algo in algos:
+                                # 簡單判斷：如果是 OCO 或 Stop Loss
+                                if algo.get("ordType") in ["oco", "conditional", "trigger"]:
+                                    algo_id = algo["algoId"]
+                                    success = self.api.amend_order(symbol, algo_id, new_trigger_price=new_sl)
+                                    if success:
+                                        pos["sl"] = new_sl # 更新本地 SL 記錄
+                                    break
 
             except Exception as e:
                 log_error(f"管理持倉失敗 {symbol}: {e}")
@@ -305,22 +316,32 @@ class QuantBot:
                 regime = self.regime_detector.detect_regime(ohlcv_1h)
                 
                 # 根據狀態篩選策略
-                # [修改] 使用者要求開啟所有策略，僅做 Log 提示
-                active_strategies = self.strategy_sequence
+                # [修改] 支援策略綁定 (Strategy Binding)
+                target_strategies = []
+                if symbol in SYMBOL_STRATEGY_MAP:
+                    # 如果 config 有指定，只跑指定的
+                    strat_names = SYMBOL_STRATEGY_MAP[symbol]
+                    for name in strat_names:
+                        if name in self.strategies:
+                            target_strategies.append(self.strategies[name])
+                else:
+                    # 沒指定就跑預設順序
+                    target_strategies = self.default_sequence
                 
                 if regime == MarketRegime.TRENDING:
-                    log(f"   👉 Regime: TRENDING (Running ALL strategies)")
+                    log(f"   👉 Regime: TRENDING")
                 elif regime == MarketRegime.RANGING:
-                    log(f"   👉 Regime: RANGING (Running ALL strategies)")
+                    log(f"   👉 Regime: RANGING")
                 else:
-                    log(f"   👉 Regime: UNCERTAIN (Running ALL strategies)")
+                    log(f"   👉 Regime: UNCERTAIN")
 
                 signal = None
                 # 依序跑策略：有訊號就用那個
-                for strat in active_strategies:
+                for strat in target_strategies:
                     s = strat.analyze(self.api, symbol)
                     if s is not None:
                         signal = s
+                        log(f"💡 {symbol} 觸發策略: {strat.name} | 訊號: {signal['side']}")
                         break
 
                 if signal is None:

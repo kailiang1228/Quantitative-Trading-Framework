@@ -1,148 +1,151 @@
-# 📈 Quant_V6_G — Institutional-Grade High-Frequency Trading System
+# 📈 Quantitative Trading Framework
 
-**Quant_V6_G** is an **Institutional-Grade High-Frequency Trading System (HFT-Lite)** designed for **OKX Perpetual Futures (USDT-M)**.
-This system has been rigorously validated through "Real-Cost Backtesting," deeply optimized for **0.05% Taker Fees** and **Slippage**, focusing on generating Alpha through high-frequency swing strategies even after deducting trading costs.
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **中文說明 (Chinese Version)**: Please refer to [README_CN.md](README_CN.md) for the traditional Chinese documentation.
+A professional, modular, and event-driven quantitative trading framework engineered for **OKX Perpetual Futures (USDT-M)**.
 
----
+Unlike simple scripts, this framework is built with **production safety** and **extensibility** in mind. It handles the complexities of real-world trading—such as network instability, exchange API quirks, and strict risk management—allowing you to focus purely on strategy logic.
 
-## 🚀 Core Advantages (核心優勢)
-
-### ⚡ High Frequency & Low Latency (高頻與低延遲)
-*   **1H Trend + 15m Entry**: Compared to traditional 4H strategies, this system reacts 4x faster, capturing intraday medium-term swings.
-*   **HFT Parameter Tuning**: Optimized Supertrend (10, 3.0) and Bollinger (2.0 Std) parameters ensure rapid position building when volatility arrives.
-
-### 🛡️ Real-Cost Defense (真實成本防禦)
-To combat the two killers of HFT—**Fees** and **False Breakouts**—the system includes multiple filtering mechanisms:
-*   **Dead Market Filter**: Forcefully stops trading when Bollinger Bandwidth < 2% to avoid fee erosion in stagnant markets.
-*   **Candle Body Filter**: Filters out Doji and long wicks to prevent false breakouts; only full-bodied candles trigger signals.
-*   **Funding Rate Protection**: Automatically calculates Funding Fees during holding periods to avoid holding high-fee positions for too long.
-
-### 🧠 Adaptive Regime Detection (自適應市場感知)
-The system features a built-in `RegimeDetector` module that analyzes market entropy in real-time:
-*   **Trending**: Activates **Supertrend** strategy when ADX > 20 and volatility expands.
-*   **Ranging**: Switches to **Bollinger Reversion** strategy when ADX < 20 and Bandwidth converges.
+> **中文說明 (Chinese Version)**: Please refer to [README_CN.md](README_CN.md).
 
 ---
 
-## 🧱 System Architecture (系統架構)
+## 🌟 Key Features
 
-Modular design ensures high scalability and maintainability:
+### 🛡️ Production-Grade Reliability
+*   **Atomic Order Execution**: Utilizes OKX's `attachAlgoOrds` to place Entry, Take-Profit (TP), and Stop-Loss (SL) orders in a single API call. This eliminates the risk of "naked positions" caused by network failures between requests.
+*   **State Persistence**: Automatically saves position state to a local JSON database (`positions_db.json`). The bot can be restarted at any time without losing track of active trades or entry prices.
+*   **Robust Error Handling**: Built-in retry mechanisms and comprehensive logging for API interactions.
+
+### ⚡ High-Fidelity Backtesting
+*   **Real-Cost Simulation**: Backtesting engine accounts for **Taker Fees**, **Slippage**, and **Funding Rates**, providing realistic performance metrics rather than theoretical gains.
+*   **Multi-Strategy Support**: Run multiple strategies simultaneously in a composite backtest to evaluate portfolio performance.
+*   **Detailed Reporting**: Generates equity curves, drawdown analysis, and trade logs.
+
+### 🧩 Modular Architecture
+*   **Decoupled Logic**: Strategies, Risk Management, and Execution are separated. Adding a new strategy is as simple as adding a file to the `strategies/` folder.
+*   **Event-Driven Core**: The main loop efficiently handles data fetching, signal generation, and order management.
+
+### ⚖️ Advanced Risk Management
+*   **Dynamic Position Sizing**: Calculates trade size based on account equity and configured risk percentage per trade.
+*   **Capital Protection**: Configurable maximum drawdown limits and margin ratio caps.
+
+---
+
+## 📂 Project Structure
 
 ```text
-Quant_V6_G/
-├── main.py                  # 🚀 System Entry Point
-├── config.py                # ⚙️ Configuration (VIP Rates, Risk)
-├── exchange_api.py          # 🏦 OKX API Wrapper (OI/Funding)
+Quantitative-Trading-Framework/
+├── main.py                  # 🚀 Entry point for the trading bot
+├── config.py                # ⚙️ Global configuration (Risk, API, Timeframes)
+├── exchange_api.py          # 🏦 Wrapper for OKX API (REST + Public Data)
 │
-├── core/                    # 🧠 Core Layer
-│   ├── quant_bot.py         # Main Loop (Strategy Dispatcher)
-│   ├── regime_detector.py   # Market Regime Analysis
-│   ├── risk_manager.py      # Risk Engine (Position Sizing)
-│   └── order_manager.py     # Order Execution (OCO / Ghost Order Cleaning)
+├── core/                    # 🧠 Core System Logic
+│   ├── quant_bot.py         # Main event loop & strategy dispatcher
+│   ├── risk_manager.py      # Position sizing & risk checks
+│   ├── order_manager.py     # Order execution & verification
+│   └── persistence.py       # JSON-based state saving/loading
 │
-├── strategies/              # 📈 Strategy Library
-│   ├── supertrend_strategy.py    # [Trend] HFT Supertrend (10, 3.0)
-│   ├── bollinger_reversion.py    # [MeanRev] Dynamic Bollinger (w/ Dead Market Filter)
-│   └── meme_breakout_strategy.py # [Alpha] Meme Coin Breakout
+├── strategies/              # 📈 Strategy Implementation
+│   ├── supertrend_strategy.py    # Example: Trend Following
+│   ├── bollinger_reversion.py    # Example: Mean Reversion
+│   └── ... (Add your own)
 │
-├── backtest/                # 🧪 Backtest Lab
-│   ├── batch_backtest.py    # Batch Backtest (Real Fee/Slippage Sim)
-│   └── composite_backtest.py# Composite Strategy Engine
+├── backtest/                # 📊 Backtesting Engine
+│   ├── composite_backtest.py     # Main backtesting script
+│   ├── simple_backtest.py        # Simplified version for learning
+│   └── generate_report.py        # Visualization tools
 │
-└── utils/                   # 🛠️ Utilities
-    ├── trade_recorder.py    # CSV Audit Logging
-    └── logger_util.py       # Telegram Real-time Alerts
+└── data/                    # 💾 Data Storage
+    └── positions_db.json    # Active position state (auto-generated)
 ```
 
----
+## 🚀 Getting Started
 
-## 📈 Strategy Logic (策略邏輯)
+### 1. Prerequisites
+*   Python 3.10 or higher
+*   An OKX account (for live/simulation trading)
 
-### 1. Supertrend Strategy (Trend Legion)
-*   **Logic**: 1H for major trend (EMA 50), 15m Supertrend (10, 3.0) for entry.
-*   **Filters**:
-    *   **ADX > 20**: Ensures momentum exists.
-    *   **Candle Body > 0.3 ATR**: Rejects false breakouts.
-*   **Target**: BTC, ETH, SOL, and other major coins with strong trends.
-
-### 2. Bollinger Reversion (Reversion Legion)
-*   **Logic**: Deep pullback trading aligned with the major trend (1H EMA). Long when price touches the lower Bollinger Band (2.0 Std) in an uptrend.
-*   **Filters**:
-    *   **Bandwidth > 2%**: Rejects dead markets.
-    *   **RSI < 30 / > 70**: Confirms extreme sentiment.
-*   **Target**: Slow bull markets with upward oscillation.
-
-### 3. Meme Breakout (Special Forces)
-*   **Logic**: Designed for high-volatility coins like DOGE, PEPE.
-*   **Condition**: Keltner Channel Breakout + Volume Explosion (> 2.0x Avg Vol).
-*   **Risk Control**: Tight Stop Loss (1.5 ATR), aiming for 10x returns.
-
----
-
-## ⚙️ Installation & Deployment (安裝與部署)
-
-### 1. Environment Setup
-Ensure Python 3.8+ is installed, then install dependencies:
+### 2. Installation
+Clone the repository and install dependencies:
 ```bash
+git clone https://github.com/yourusername/Quantitative-Trading-Framework.git
+cd Quantitative-Trading-Framework
 pip install -r requirements.txt
 ```
 
-### 2. Data Preparation
-The system relies on historical data for backtesting and analysis:
-```bash
-# 1. Download OHLCV, Funding Rates, Open Interest (Auto-fetches Top 20)
-python download_data.py
-```
-
 ### 3. Configuration
-Copy `config_template.py` to `config.py` and fill in your OKX API credentials and risk settings:
-
-```bash
-cp config_template.py config.py
-```
+Edit `config.py` to set your preferences.
+*   **Risk Settings**: Adjust `RISK_PER_TRADE` (default 2%) and `LEVERAGE`.
+*   **API Keys**: Set your OKX API keys via environment variables (Recommended) or directly in the file for testing.
 
 ```python
-# config.py
-
-# 1. API Settings
-OKX_API_KEY = "your_api_key"
-OKX_SECRET = "your_secret"
-OKX_PASSWORD = "your_password"
-USE_TESTNET = False  # Recommended: True for simulation first
-
-# 2. Risk Settings
-RISK_PER_TRADE = 0.02      # 2% Risk per trade
-MAX_TOTAL_MARGIN_RATIO = 0.6 # Max Total Margin 60%
+# Example in config.py
+API_KEY = os.getenv("OKX_API_KEY")
+IS_SIMULATION = True  # Set to False for real trading
 ```
 
-### 4. Launch Bot
+### 4. Running Backtests
+Validate your strategy with historical data before going live.
+```bash
+# Ensure you have CSV data in the data/ folder (format: timestamp, open, high, low, close, volume)
+python backtest/composite_backtest.py
+```
+
+### 5. Running the Bot
+Start the bot in simulation mode (default) or live mode.
 ```bash
 python main.py
 ```
 
 ---
 
-## 🧪 Backtesting System (回測系統)
+## 🧠 Included Strategies
 
-This system includes the industry's strictest backtesting module, rejecting "Happy Path Simulations":
+The framework comes with two core strategy templates to get you started. These are designed to be simple yet effective foundations for more complex logic.
 
-### Batch Backtest
-Simulates real market friction costs to verify if the strategy remains profitable after fees.
-*   **Fee Rate**: 0.05% (Taker)
-*   **Slippage**: 0.02%
-*   **Funding**: Dynamic Calculation
+### 1. Supertrend Strategy (Trend Following)
+*   **Concept**: A classic trend-following system designed to capture large directional moves in the market. It assumes that once a trend is established, it is more likely to continue than to reverse.
+*   **Entry Logic**:
+    *   **Long**: Enters when the price closes **above** the Supertrend line, indicating a bullish trend reversal.
+    *   **Short**: Enters when the price closes **below** the Supertrend line, indicating a bearish trend reversal.
+*   **Exit Logic**:
+    *   **Stop Loss**: Dynamic. The Stop Loss trails along the Supertrend line itself, locking in profits as the trend progresses.
+    *   **Take Profit**: Calculated based on a fixed Risk-Reward Ratio (e.g., 2:1) relative to the initial stop loss distance.
 
-```bash
-python Quant_V6_G/backtest/batch_backtest.py
-```
-*Results are automatically sorted into `batch_backtest_results.csv`. Coins with PF > 1.1 are recommended for the whitelist.*
+### 2. Bollinger Mean Reversion (Oscillator)
+*   **Concept**: A counter-trend strategy designed for ranging or sideways markets. It assumes that prices are elastic and will revert to the mean (average) after hitting extreme levels.
+*   **Entry Logic**:
+    *   **Long**: Enters when the price touches or breaks below the **Lower Bollinger Band**, indicating an oversold condition.
+    *   **Short**: Enters when the price touches or breaks above the **Upper Bollinger Band**, indicating an overbought condition.
+*   **Exit Logic**:
+    *   **Take Profit**: Placed at the **Middle Band** (Moving Average), representing the equilibrium price.
+    *   **Stop Loss**: Placed at a multiple of ATR (Average True Range) beyond the entry band to allow for market noise.
 
 ---
 
-## ⚠️ Disclaimer (免責聲明)
+## 🛠️ Developing New Strategies
 
-This software is for educational and research purposes only. Cryptocurrency trading involves high risk and may result in the total loss of funds.
-**The developer is not responsible for any profits or losses generated by using this system.** Please ensure you fully test on a Testnet before trading with real capital.
+To create a new strategy, add a Python file in `strategies/` and implement the `analyze` method.
 
+```python
+# strategies/my_custom_strategy.py
+class MyCustomStrategy:
+    def __init__(self):
+        self.name = "MyStrategy"
+
+    def analyze(self, api, symbol):
+        # 1. Fetch data
+        # 2. Calculate indicators
+        # 3. Return signal (Buy/Sell) or None
+        pass
+```
+
+---
+
+## ⚠️ Disclaimer
+
+**USE AT YOUR OWN RISK.**
+
+This software is for educational and research purposes only. Cryptocurrency trading involves substantial risk of loss and is not suitable for every investor. The authors and contributors are not responsible for any financial losses incurred through the use of this software. Always test thoroughly in simulation mode before risking real capital.
